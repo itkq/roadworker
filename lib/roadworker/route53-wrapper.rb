@@ -297,22 +297,40 @@ module Roadworker
         end
 
         unless @options.dry_run
-          @options.route53.change_resource_record_sets(
-            hosted_zone_id: @hosted_zone.id,
-            change_batch: {
-              changes: [
-                {
-                  action: 'DELETE',
-                  resource_record_set: resource_record_set_prev,
-                },
-                {
-                  action: 'CREATE',
-                  resource_record_set: @resource_record_set,
-                },
-              ],
-            },
-          )
-          @options.updated = true
+          begin
+            @options.route53.change_resource_record_sets(
+              hosted_zone_id: @hosted_zone.id,
+              change_batch: {
+                changes: [
+                  {
+                    action: 'DELETE',
+                    resource_record_set: resource_record_set_prev,
+                  },
+                  {
+                    action: 'CREATE',
+                    resource_record_set: @resource_record_set,
+                  },
+                ],
+              },
+            )
+            @options.updated = true
+          rescue Aws::Route53::Errors::InvalidChangeBatch => e
+            # for debugging InvalidChangeBatch [Tried to delete resource record set but the values provided do not match the current values]
+            log(:info, "delete resource record set: #{resource_record_set_prev.inspect}", nil, false)
+            log(:info, "create resource record set: #{@resource_record_set.inspect}", nil, false)
+
+            # fetch resource record set that we tried to delete
+            resp = @options.route53.list_resource_record_sets(
+              hosted_zone_id: @hosted_zone.id,
+              start_record_name: resource_record_set_prev.name,
+              max_items: 1,
+            )
+
+            rrset = resp.resource_record_set.first&.inspect
+            log(:info, "found resource record sets starts with the name: #{rrset}", nil, false)
+
+            raise e
+          end
         end
       end
 
